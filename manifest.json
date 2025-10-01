@@ -1,7 +1,7 @@
 {
   "name": "Gym Tracker",
   "short_name": "Gym",
-  "start_url": "./Wdeep2.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#111111",
