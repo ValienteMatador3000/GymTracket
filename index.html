@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>Gym Tracker — Con Sesiones (v2.1 PWA)</title>
+  <title>Gym Tracker — Con Sesiones (v2.1 integrado)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
 
   <!-- PWA -->
@@ -142,8 +142,7 @@
 
     /* chart canvas */
     .chart-wrap { max-width:720px; margin:0 auto; border-radius:10px; overflow:hidden; background:#fff; border:1px solid var(--border); padding:12px; }
-    /* Fixed height for canvas wrapper gives Chart.js a height to use reliably */
-    .chart-wrap canvas { display:block; width:100%; height:320px; }
+    canvas { display:block; width:100%; height:240px; }
 
     /* small helpers */
     .muted { color:var(--muted); font-size:13px; }
@@ -174,7 +173,7 @@
 
   <main>
     <!-- Ejercicios -->
-    <section id="ejercicios" class="active" aria-label="Mis ejercicios">
+    <section id="ejercicios" aria-label="Mis ejercicios">
       <h2>Mis Ejercicios</h2>
       <div id="lista-ejercicios" aria-live="polite"></div>
       <button class="fab" id="fab-nuevo-ejercicio" title="Nuevo ejercicio" aria-label="Nuevo ejercicio">
@@ -674,7 +673,6 @@ function renderSeriesHoy(){
   }
 
   let html = '';
-  Object.entries(sesion.ejercicios).forEach(([
   Object.entries(sesion.ejercicios).forEach(([ejercicio, series]) => {
     if (series.length > 0) {
       html += `<div class="exercise-block">`;
@@ -694,6 +692,7 @@ function renderSeriesHoy(){
 }
 
 function editarSerieSesion(ejercicio, index){
+  // encontrar sesión activa y la serie
   const sesion = obtenerSesionActiva();
   if (!sesion || !sesion.ejercicios[ejercicio] || !sesion.ejercicios[ejercicio][index]) return;
   const s = sesion.ejercicios[ejercicio][index];
@@ -800,35 +799,9 @@ function restoreTemporizadorOnLoad(){
 }
 
 /* ============================
-  Gráficas (Chart.js) y Progreso — CORRECCIÓN: manejo de tamaño del canvas
+  Gráficas (Chart.js) y Progreso
 ============================*/
 let chartInstance = null;
-
-/**
- * Asegura que el canvas tenga dimensión real (incl. devicePixelRatio)
- * para evitar que Chart.js cree un gráfico "pequeño" cuando el canvas
- * estaba oculto o no tenía altura al momento de creación.
- */
-function ensureCanvasSize(canvas) {
-  // el contenedor (.chart-wrap) tiene un height CSS definido en .chart-wrap canvas {height:320px}
-  if (!canvas) return;
-  // forzar estilo width 100% y mantener la altura CSS
-  canvas.style.width = '100%';
-  // canvas height is given by computed style (chart-wrap canvas {height:320px})
-  const computed = getComputedStyle(canvas);
-  const height = parseFloat(computed.height) || canvas.clientHeight || 320;
-  canvas.style.height = height + 'px';
-
-  const ratio = window.devicePixelRatio || 1;
-  const w = Math.round(canvas.clientWidth * ratio);
-  const h = Math.round(canvas.clientHeight * ratio);
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  }
-}
 
 function renderSelectProgreso(){
   const sel = document.getElementById('select-progreso');
@@ -863,17 +836,11 @@ function obtenerTodasLasSeriesDeEjercicio(ejercicio){
 
 function drawChart(){
   const canvas = document.getElementById('graficaProgreso');
-  if (!canvas) return;
   const ctx = canvas.getContext('2d');
-
-  // destruir anterior si existe
   if (chartInstance) {
-    try { chartInstance.destroy(); } catch(e) { /* ignore */ }
+    try { chartInstance.destroy(); } catch(e) {}
     chartInstance = null;
   }
-
-  // asegurar tamaño correcto antes de crear el chart
-  ensureCanvasSize(canvas);
 
   const select = document.getElementById('select-progreso');
   const ejercicio = select ? select.value : (ejercicios[0] || '');
@@ -902,8 +869,6 @@ function drawChart(){
       ]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false, // <- importante: usar la altura del contenedor
       plugins: { legend: { labels: { color: '#111' } } },
       scales: {
         x: { ticks: { color: '#666' } },
@@ -912,23 +877,7 @@ function drawChart(){
       }
     }
   });
-
-  // asegurar redimensionado correcto al estar visible
-  try { chartInstance.resize(); } catch(e){}
 }
-
-// redibujar gráfico en resize (evita que se quede pequeño en cambios de viewport)
-let resizeTimeout = null;
-window.addEventListener('resize', () => {
-  if (resizeTimeout) clearTimeout(resizeTimeout);
-  resizeTimeout = setTimeout(() => {
-    // si estamos en progreso, redibujar completo
-    if (document.getElementById('progreso').classList.contains('active')) drawChart();
-    else if (chartInstance) {
-      try { chartInstance.resize(); } catch(e){}
-    }
-  }, 120);
-});
 
 /* ============================
   Historial agrupado por ejercicio — acordeón
@@ -1034,7 +983,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     renderHistorialByExercise();
   });
 
-  // window resize -> redraw chart (también implementado arriba con debounce)
+  // window resize -> redraw chart
   window.addEventListener('resize', ()=> drawChart());
 
   // inicializar vistas
