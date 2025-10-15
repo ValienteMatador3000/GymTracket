@@ -2,18 +2,25 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>Gym Tracker — Con Sesiones (v2.1 integrado)</title>
+  <title>Gym Tracker — Con Sesiones (v2.1.1)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
 
-  <!-- PWA -->
+  <!-- PWA manifest y meta -->
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#111111">
   <meta name="mobile-web-app-capable" content="yes">
   <link rel="icon" href="icon-192.png">
 
-  <!-- Chart.js -->
+  <!-- Chart.js (UMD build) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
+  <!-- =======================
+       Estilos (inline, centralizados)
+       =======================
+       Comentarios:
+       - Mantengo la estética minimalista en grises.
+       - Muchas clases son reutilizadas en los templates dinámicos.
+  -->
   <style>
     :root{
       --bg: #ffffff;
@@ -142,7 +149,8 @@
 
     /* chart canvas */
     .chart-wrap { max-width:720px; margin:0 auto; border-radius:10px; overflow:hidden; background:#fff; border:1px solid var(--border); padding:12px; }
-    canvas { display:block; width:100%; height:240px; }
+    /* Dar una altura mayor para mejorar visualización en móvil */
+    .chart-wrap canvas { display:block; width:100%; height:360px; }
 
     /* small helpers */
     .muted { color:var(--muted); font-size:13px; }
@@ -169,28 +177,40 @@
   </style>
 </head>
 <body>
+  <!-- HEADER -->
   <header><h1>Gym Tracker</h1></header>
 
+  <!-- MAIN: secciones EJERCICIOS / RUTINAS / ENTRENAMIENTO / PROGRESO -->
   <main>
-    <!-- Ejercicios -->
-    <section id="ejercicios" aria-label="Mis ejercicios">
+    <!-- =========================
+         SECCIÓN: EJERCICIOS
+         ========================= -->
+    <section id="ejercicios" aria-label="Mis ejercicios" class="active">
       <h2>Mis Ejercicios</h2>
       <div id="lista-ejercicios" aria-live="polite"></div>
+
+      <!-- FAB para nuevo ejercicio -->
       <button class="fab" id="fab-nuevo-ejercicio" title="Nuevo ejercicio" aria-label="Nuevo ejercicio">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
     </section>
 
-    <!-- Rutinas -->
+    <!-- =========================
+         SECCIÓN: RUTINAS
+         ========================= -->
     <section id="rutinas" aria-label="Mis rutinas">
       <h2>Mis Rutinas</h2>
       <div id="lista-rutinas" aria-live="polite"></div>
+
+      <!-- FAB para nueva rutina -->
       <button class="fab" id="fab-nueva-rutina" title="Nueva rutina" style="right:18px" aria-label="Nueva rutina">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
     </section>
 
-    <!-- Entrenamiento -->
+    <!-- =========================
+         SECCIÓN: ENTRENAMIENTO
+         ========================= -->
     <section id="entrenamiento" aria-label="Entrenamiento activo">
       <h2>Entrenamiento Activo</h2>
 
@@ -238,7 +258,9 @@
       </div>
     </section>
 
-    <!-- Progreso -->
+    <!-- =========================
+         SECCIÓN: PROGRESO
+         ========================= -->
     <section id="progreso" aria-label="Progreso">
       <h2>Progreso</h2>
 
@@ -258,7 +280,7 @@
     </section>
   </main>
 
-  <!-- nav -->
+  <!-- NAV -->
   <nav aria-label="Navegación">
     <button id="nav-ejercicios" data-section="ejercicios" class="active" title="Ejercicios">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -278,13 +300,22 @@
     </button>
   </nav>
 
-  <!-- modal container -->
+  <!-- CONTENEDOR DE MODALES (usado para insertar modales dinámicamente) -->
   <div id="modal-container" style="display:none;"></div>
 
 <script>
+/* ============================================================
+   Gym Tracker v2.1.1 - index.html completo
+   Comentarios técnicos en español (mantenimiento & explicación)
+   ============================================================ */
+
 /* ============================
-  Datos y persistencia (mantener compatibilidad con tu estructura)
-============================*/
+   Sección: Datos y persistencia
+   - Estructuras: ejercicios, rutinas, sesiones
+   - LocalStorage como backend simple (sin sincronización remota)
+   - Se implementa respaldo periódico automático
+   ============================ */
+
 let ejercicios = JSON.parse(localStorage.getItem('ejercicios')) || ["Sentadilla con Barra", "Press de Banca", "Peso Muerto"];
 let rutinas = JSON.parse(localStorage.getItem('rutinas')) || [];
 let sesiones = JSON.parse(localStorage.getItem('sesiones')) || [];
@@ -292,25 +323,54 @@ let temporizadorDefault = parseInt(localStorage.getItem('temporizadorDefault')) 
 let temporizadorState = JSON.parse(localStorage.getItem('temporizadorState')) || { running:false, restante: temporizadorDefault, lastTick:null };
 let sesionActivaId = localStorage.getItem('sesionActivaId') || null;
 
+/* Auto-respaldo: cada 5 minutos guardamos por seguridad */
+const AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000;
+let autosaveTimer = null;
+
 function saveAll(){
-  localStorage.setItem('ejercicios', JSON.stringify(ejercicios));
-  localStorage.setItem('rutinas', JSON.stringify(rutinas));
-  localStorage.setItem('sesiones', JSON.stringify(sesiones));
-  localStorage.setItem('temporizadorDefault', String(temporizadorDefault));
-  localStorage.setItem('temporizadorState', JSON.stringify(temporizadorState));
-  localStorage.setItem('sesionActivaId', sesionActivaId);
+  // Guardado centralizado con protección para no bloquear el hilo
+  try {
+    localStorage.setItem('ejercicios', JSON.stringify(ejercicios));
+    localStorage.setItem('rutinas', JSON.stringify(rutinas));
+    localStorage.setItem('sesiones', JSON.stringify(sesiones));
+    localStorage.setItem('temporizadorDefault', String(temporizadorDefault));
+    localStorage.setItem('temporizadorState', JSON.stringify(temporizadorState));
+    localStorage.setItem('sesionActivaId', sesionActivaId);
+  } catch (e) {
+    // LocalStorage puede fallar si el espacio es insuficiente; dejar registro para debugging.
+    console.error('saveAll error', e);
+  }
+}
+
+/* Inicia el temporizador de auto-guardado */
+function startAutoSave(){
+  if (autosaveTimer) clearInterval(autosaveTimer);
+  autosaveTimer = setInterval(()=> {
+    console.log('[autosave] guardando estado local...');
+    saveAll();
+  }, AUTOSAVE_INTERVAL_MS);
+}
+
+/* Detener autosave (por ejemplo en pruebas) */
+function stopAutoSave(){
+  if (autosaveTimer) clearInterval(autosaveTimer);
+  autosaveTimer = null;
 }
 
 /* ============================
-  Sesiones
-============================*/
+   Sección: Gestión de sesiones
+   - crearNuevaSesion: crea y marca como activa
+   - obtenerSesionActiva: retorna la sesión actual o crea nueva si no existe
+   - actualizarInfoSesion: actualiza la UI correspondiente
+   ============================ */
+
 function crearNuevaSesion(){
   const hoy = new Date().toISOString().split('T')[0];
   const nuevaSesion = {
     id: 'sesion_' + Date.now(),
     fecha: hoy,
     nombre: `Entrenamiento ${hoy}`,
-    ejercicios: {}
+    ejercicios: {} // mapa: nombreEjercicio -> [ {peso,reps,fechaISO}, ... ]
   };
   sesiones.unshift(nuevaSesion);
   sesionActivaId = nuevaSesion.id;
@@ -319,23 +379,23 @@ function crearNuevaSesion(){
 }
 
 function obtenerSesionActiva(){
+  // Si no existe sesionActivaId, crear una nueva
   if (!sesionActivaId) {
     return crearNuevaSesion();
   }
-
   const sesion = sesiones.find(s => s.id === sesionActivaId);
   if (!sesion) {
     return crearNuevaSesion();
   }
-
+  // Si la sesión activa no es de hoy, creamos nueva (evitar acumular días distintos en una misma sesión)
   const hoy = new Date().toISOString().split('T')[0];
   if (sesion.fecha !== hoy) {
     return crearNuevaSesion();
   }
-
   return sesion;
 }
 
+/* Actualiza texto de la UI que indica la sesión activa */
 function actualizarInfoSesion(){
   const sesion = obtenerSesionActiva();
   const infoEl = document.getElementById('sesion-actual-info');
@@ -345,10 +405,14 @@ function actualizarInfoSesion(){
 }
 
 /* ============================
-  Utilidades
-============================*/
+   Utilidades generales
+   - escapeHtml: sanitiza texto para evitar inyección en innerHTML
+   - fmtDateShort: formatea fecha YYYY-MM-DD a local
+   - clamp: utilitario para limitar valores
+   ============================ */
+
 function escapeHtml(text){
-  if (!text) return '';
+  if (text === undefined || text === null) return '';
   return String(text).replace(/[&"'<>]/g, function (a) {
     return {'&':'&amp;','"':'&quot;',"'":"&#39;",'<':'&lt;','>':'&gt;'}[a];
   });
@@ -359,10 +423,14 @@ function fmtDateShort(dateStr){
     return d.toLocaleDateString();
   } catch(e){ return dateStr; }
 }
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
 
 /* ============================
-  Navegación
-============================*/
+   Navegación entre secciones
+   - showSection: oculta secciones y muestra la seleccionada
+   - actualiza vista según sección
+   ============================ */
+
 function showSection(id){
   document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
   const target = document.getElementById(id);
@@ -371,31 +439,34 @@ function showSection(id){
   document.querySelectorAll('nav button').forEach(b=> b.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b=>{ if (b.dataset.section === id) b.classList.add('active'); });
 
+  // acciones por sección
   if (id === 'ejercicios') renderEjercicios();
   if (id === 'rutinas') renderRutinas();
   if (id === 'entrenamiento') {
-    renderEjercicios();
+    renderEjercicios(); // refrescar listado de ejercicios
     actualizarInfoSesion();
     renderSeriesHoy();
     fillExerciseSelect();
   }
   if (id === 'progreso') {
     renderSelectProgreso();
-    drawChart();
-    renderHistorialByExercise();
+    // drawChart() usa IntersectionObserver para evitar dibujar si está oculto; lo forzamos aquí
+    setTimeout(()=> { drawChart(); renderHistorialByExercise(); }, 50);
   }
 }
 
 /* ============================
-  Ejercicios
-============================*/
+   Gestión de Ejercicios
+   - renderEjercicios: dibuja la lista
+   - openExerciseModal: modal para crear/editar ejercicio
+   - eliminar ejercicio -> actualizar rutinas y sesiones
+   ============================ */
+
 function renderEjercicios(){
   const cont = document.getElementById('lista-ejercicios');
   cont.innerHTML = '';
   if (ejercicios.length === 0){
-    const ph = document.createElement('div');
-    ph.className = 'card';
-    ph.innerHTML = '<div class="muted">No hay ejercicios. Pulsa + para crear uno.</div>';
+    const ph = document.createElement('div'); ph.className = 'card'; ph.innerHTML = '<div class="muted">No hay ejercicios. Pulsa + para crear uno.</div>';
     cont.appendChild(ph);
     return;
   }
@@ -404,8 +475,7 @@ function renderEjercicios(){
     const card = document.createElement('div'); card.className='card';
     const left = document.createElement('div'); left.className='left';
     left.innerHTML = `<strong>${escapeHtml(e)}</strong><div class="muted">Ejercicio #${i+1}</div>`;
-    const actions = document.createElement('div');
-    actions.style.display='flex'; actions.style.gap='6px';
+    const actions = document.createElement('div'); actions.style.display='flex'; actions.style.gap='6px';
     const editBtn = document.createElement('button'); editBtn.className='icon-btn'; editBtn.title='Editar';
     editBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 21l3.9-.9L20.7 6.3a1 1 0 0 0 0-1.4L19.1 3.3a1 1 0 0 0-1.4 0L4.5 16.5 3 21z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     editBtn.addEventListener('click', ()=> openExerciseModal(i));
@@ -414,7 +484,9 @@ function renderEjercicios(){
     delBtn.addEventListener('click', ()=>{
       if (!confirm(`¿Eliminar ejercicio "${ejercicios[i]}"?`)) return;
       const removed = ejercicios.splice(i,1)[0];
+      // Eliminamos referencia en rutinas
       rutinas = rutinas.map(r=> ({...r, ejercicios: r.ejercicios.filter(x=>x!==removed)}));
+      // Eliminamos de sesiones
       sesiones.forEach(s => {
         if (s.ejercicios[removed]) {
           delete s.ejercicios[removed];
@@ -428,17 +500,22 @@ function renderEjercicios(){
     cont.appendChild(card);
   });
 
+  // después de renderizar, actualizar select del entrenamiento
   fillExerciseSelect();
 }
 
+/* Modal para crear/editar ejercicio (mejor que prompt: inputs editables) */
 function openExerciseModal(index){
   const container = document.getElementById('modal-container'); container.innerHTML=''; container.style.display='block';
   const backdrop = document.createElement('div'); backdrop.className='modal-backdrop';
   const modal = document.createElement('div'); modal.className='modal';
+
   modal.innerHTML = `
     <header style="display:flex;justify-content:space-between;align-items:center;">
       <strong>${index==null ? 'Nuevo ejercicio' : 'Editar ejercicio'}</strong>
-      <button id="close" class="icon-btn" title="Cerrar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M6 18L18 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      <button id="close" class="icon-btn" title="Cerrar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M6 18L18 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
     </header>
     <div style="margin-top:10px;">
       <label class="muted">Nombre</label>
@@ -461,7 +538,9 @@ function openExerciseModal(index){
     } else {
       const old = ejercicios[index];
       ejercicios[index] = val;
+      // actualizar rutinas que contenían el nombre antiguo
       rutinas = rutinas.map(r=> ({...r, ejercicios: r.ejercicios.map(x=> x===old ? val : x)}));
+      // actualizar sesiones
       sesiones.forEach(s => {
         if (s.ejercicios[old]) {
           s.ejercicios[val] = s.ejercicios[old];
@@ -478,8 +557,12 @@ function openExerciseModal(index){
 }
 
 /* ============================
-  Rutinas (mejorada)
-============================*/
+   Sección: Rutinas
+   - renderRutinas: lista con botones Iniciar/Editar/Borrar
+   - openRutinaModal: modal con checkboxes y arrastrar para reordenar
+   - iniciarRutina: cargará los ejercicios en el select de entrenamiento y cambia de sección
+   ============================ */
+
 function renderRutinas(){
   const cont = document.getElementById('lista-rutinas'); cont.innerHTML='';
   if (rutinas.length === 0){
@@ -487,9 +570,9 @@ function renderRutinas(){
   }
   rutinas.forEach((r,i)=>{
     const card = document.createElement('div'); card.className='card';
-    const left = document.createElement('div'); left.className='left'; 
+    const left = document.createElement('div'); left.className='left';
     const lastUsed = findLastUsedDateForRoutine(r) || '';
-    left.innerHTML = `<strong>${escapeHtml(r.nombre)}</strong><div class="meta">${r.ejercicios.length} ejercicios${lastUsed ? ' · Última: '+escapeHtml(lastUsed) : ''}</div>`;
+    left.innerHTML = `<strong>${escapeHtml(r.nombre)}</strong><div class="muted">${r.ejercicios.length} ejercicios${lastUsed ? ' · Última: '+escapeHtml(lastUsed) : ''}</div>`;
     const actions = document.createElement('div'); actions.style.display='flex'; actions.style.gap='6px';
     const loadBtn = document.createElement('button'); loadBtn.className='btn'; loadBtn.title='Cargar rutina'; loadBtn.textContent='Iniciar';
     loadBtn.addEventListener('click', ()=> iniciarRutina(i));
@@ -503,7 +586,9 @@ function renderRutinas(){
   });
 }
 
+/* findLastUsedDateForRoutine: busca en sesiones la ultima vez que algun ejercicio de la rutina se uso */
 function findLastUsedDateForRoutine(r){
+  // recorre sesiones (más recientes primero), devuelve la fecha de la primera coincidencia
   for (const s of sesiones){
     for (const e of r.ejercicios){
       if (s.ejercicios && s.ejercicios[e] && s.ejercicios[e].length>0) return new Date(s.fecha).toLocaleDateString();
@@ -512,6 +597,10 @@ function findLastUsedDateForRoutine(r){
   return null;
 }
 
+/* Modal de Rutina: edición con reordenado y checkboxes
+   - Se renderiza una lista combinada: los ejercicios de la rutina en primer lugar, luego los demás
+   - Permite reordenar mediante drag & drop y botones subir/bajar
+*/
 function openRutinaModal(index){
   const container = document.getElementById('modal-container'); container.innerHTML=''; container.style.display='block';
   const backdrop = document.createElement('div'); backdrop.className='modal-backdrop';
@@ -537,6 +626,7 @@ function openRutinaModal(index){
   `;
   backdrop.appendChild(modal); container.appendChild(backdrop);
 
+  // Construimos 'order': primero los de la rutina, luego los demás no incluidos
   let order = [...(copy.ejercicios || [])];
   ejercicios.forEach(e => { if (!order.includes(e)) order.push(e); });
 
@@ -551,6 +641,7 @@ function openRutinaModal(index){
       item.appendChild(left); item.appendChild(right);
       list.appendChild(item);
 
+      // Drag & drop simples
       item.addEventListener('dragstart', ev => { ev.dataTransfer.setData('text/plain', idx); item.style.opacity='0.5'; });
       item.addEventListener('dragend', ()=> item.style.opacity='1');
       item.addEventListener('dragover', ev => ev.preventDefault());
@@ -601,7 +692,10 @@ function openRutinaModal(index){
 
 function nuevaRutina(){ if (ejercicios.length===0){ alert('Primero crea ejercicios.'); return; } openRutinaModal(null); }
 
-function cargarRutina(i){
+/* iniciarRutina: copia los ejercicios seleccionados al select y cambia a sección entrenamiento
+   - Si quieres podríamos además crear una sesión pre-llenada con esa rutina
+*/
+function iniciarRutina(i){
   const r = rutinas[i];
   if (!r || !r.ejercicios || r.ejercicios.length===0){ alert('La rutina no tiene ejercicios.'); return; }
   const select = document.getElementById('select-ejercicio'); select.innerHTML='';
@@ -610,8 +704,14 @@ function cargarRutina(i){
 }
 
 /* ============================
-  Entrenamiento / Registros por Sesión (mejorado: editar/eliminar)
-============================*/
+   Entrenamiento: registrar series, editar, eliminar
+   - fillExerciseSelect: rellena select con ejercicios disponibles (incluye rutinas)
+   - guardarSerie: registro seguro en la sesión actual (evita duplicados cercanos)
+   - renderSeriesHoy: muestra las series y botones editar/borrar
+   - editarSerieSesion: abre modal de edición (en lugar de prompt)
+   - eliminarSerieSesion: elimina con confirmación
+   ============================ */
+
 function fillExerciseSelect(){
   const select = document.getElementById('select-ejercicio');
   if (!select) return;
@@ -623,6 +723,10 @@ function fillExerciseSelect(){
   if (prev) select.value = prev;
 }
 
+/* Guardar serie en la sesión activa.
+   - Validaciones básicas
+   - Evita duplicados si se registró una serie igual en 10s previos
+*/
 function guardarSerie(){
   const select = document.getElementById('select-ejercicio');
   const ejercicio = select ? select.value : null;
@@ -663,6 +767,9 @@ function guardarSerie(){
   setTimeout(()=> btn.textContent = 'Añadir Serie', 900);
 }
 
+/* renderSeriesHoy: muestra las series agrupadas por ejercicio con botones editar y borrar
+   - Usamos modal para editar serie (mejor UX que prompt)
+*/
 function renderSeriesHoy(){
   const cont = document.getElementById('series-hoy');
   const sesion = obtenerSesionActiva();
@@ -679,9 +786,10 @@ function renderSeriesHoy(){
       html += `<div style="display:flex;justify-content:space-between;align-items:center;"><div style="font-weight:600; margin-bottom:4px;">${escapeHtml(ejercicio)}</div><div class="small">${series.length} series</div></div>`;
       series.forEach((serie, idx) => {
         html += `<div class="series-item">`;
-        html += `<span>${serie.peso}kg × ${serie.reps} reps</span>`;
-        html += `<span class="muted">${new Date(serie.fechaISO).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>`;
-        html += `<span style="margin-left:8px;"><button class="btn small" onclick="editarSerieSesion('${escapeHtml(ejercicio)}', ${idx})">Editar</button> <button class="btn small secondary" onclick="eliminarSerieSesion('${escapeHtml(ejercicio)}', ${idx})">Borrar</button></span>`;
+        html += `<div style="display:flex;gap:12px;align-items:center;"><span>${serie.peso}kg</span><span class="muted">× ${serie.reps} reps</span></div>`;
+        html += `<div style="display:flex;gap:8px;align-items:center;"><span class="muted">${new Date(serie.fechaISO).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>`;
+        html += `<span><button class="btn small" data-ej="${escapeHtml(ejercicio)}" data-idx="${idx}" onclick="editarSerieSesionModal('${escapeHtml(ejercicio)}', ${idx})">Editar</button></span>`;
+        html += `<span><button class="btn small secondary" data-ej="${escapeHtml(ejercicio)}" data-idx="${idx}" onclick="eliminarSerieSesion('${escapeHtml(ejercicio)}', ${idx})">Borrar</button></span></div>`;
         html += `</div>`;
       });
       html += `</div>`;
@@ -691,28 +799,85 @@ function renderSeriesHoy(){
   cont.innerHTML = html;
 }
 
-function editarSerieSesion(ejercicio, index){
-  // encontrar sesión activa y la serie
+/* editarSerieSesionModal: abre un modal con inputs para permitir edición completa
+   - Permite borrar o limpiar campos sin problemas (a diferencia de prompt)
+   - Validaciones y guardado
+*/
+function editarSerieSesionModal(ejercicio, index){
   const sesion = obtenerSesionActiva();
   if (!sesion || !sesion.ejercicios[ejercicio] || !sesion.ejercicios[ejercicio][index]) return;
   const s = sesion.ejercicios[ejercicio][index];
 
-  const nuevoPesoRaw = prompt('Nuevo peso (kg):', String(s.peso));
-  if (nuevoPesoRaw === null) return;
-  const nuevasRepsRaw = prompt('Nuevas repeticiones:', String(s.reps));
-  if (nuevasRepsRaw === null) return;
+  // construir modal
+  const container = document.getElementById('modal-container'); container.innerHTML=''; container.style.display='block';
+  const backdrop = document.createElement('div'); backdrop.className='modal-backdrop';
+  const modal = document.createElement('div'); modal.className='modal';
+  modal.innerHTML = `
+    <header style="display:flex;justify-content:space-between;align-items:center;">
+      <strong>Editar serie — ${escapeHtml(ejercicio)}</strong>
+      <button id="close" class="icon-btn" title="Cerrar">✕</button>
+    </header>
+    <div style="margin-top:10px;">
+      <label class="muted">Peso (kg)</label>
+      <input id="edit-peso" class="input" value="${s.peso}" />
+    </div>
+    <div style="margin-top:10px;">
+      <label class="muted">Repeticiones</label>
+      <input id="edit-reps" class="input" value="${s.reps}" />
+    </div>
+    <div style="margin-top:10px;">
+      <label class="muted">Fecha/Hora</label>
+      <input id="edit-fecha" class="input" value="${s.fechaISO}" />
+      <div class="small muted">Formato ISO (puedes dejarlo)</div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+      <button id="delete" class="btn small secondary">Eliminar serie</button>
+      <button id="cancel" class="btn small secondary">Cancelar</button>
+      <button id="save" class="btn small">Guardar</button>
+    </div>
+  `;
+  backdrop.appendChild(modal); container.appendChild(backdrop);
 
-  const pesoNum = parseFloat(nuevoPesoRaw.trim());
-  const repsNum = parseInt(nuevasRepsRaw.trim(),10);
-  if (isNaN(pesoNum) || isNaN(repsNum)) { alert('Valores inválidos.'); return; }
+  // handlers
+  modal.querySelector('#close').addEventListener('click', closeModal);
+  modal.querySelector('#cancel').addEventListener('click', closeModal);
 
-  s.peso = pesoNum;
-  s.reps = repsNum;
-  saveAll();
-  renderSeriesHoy();
-  drawChart();
+  modal.querySelector('#delete').addEventListener('click', ()=>{
+    if (!confirm('¿Eliminar esta serie?')) return;
+    sesion.ejercicios[ejercicio].splice(index,1);
+    saveAll();
+    closeModal();
+    renderSeriesHoy();
+    drawChart();
+  });
+
+  modal.querySelector('#save').addEventListener('click', ()=>{
+    const pRaw = modal.querySelector('#edit-peso').value;
+    const rRaw = modal.querySelector('#edit-reps').value;
+    const fRaw = modal.querySelector('#edit-fecha').value;
+    // validar
+    const pesoNum = parseFloat(String(pRaw).trim());
+    const repsNum = parseInt(String(rRaw).trim(),10);
+    if (isNaN(pesoNum) || isNaN(repsNum)) { alert('Peso o repeticiones inválidas'); return; }
+    // respetar formato ISO si es válido, si no, usar fecha anterior
+    let fechaISO = s.fechaISO;
+    try {
+      const d = new Date(fRaw);
+      if (!isNaN(d.getTime())) fechaISO = d.toISOString();
+    } catch(e){}
+    s.peso = pesoNum;
+    s.reps = repsNum;
+    s.fechaISO = fechaISO;
+    saveAll();
+    closeModal();
+    renderSeriesHoy();
+    drawChart();
+  });
+
+  function closeModal(){ container.style.display='none'; container.innerHTML=''; }
 }
 
+/* eliminarSerieSesion: confirm + eliminar + actualizar vistas */
 function eliminarSerieSesion(ejercicio, index){
   const sesion = obtenerSesionActiva();
   if (!sesion || !sesion.ejercicios[ejercicio]) return;
@@ -723,6 +888,7 @@ function eliminarSerieSesion(ejercicio, index){
   drawChart();
 }
 
+/* nuevaSesion: crear sesión nueva con confirmación */
 function nuevaSesion(){
   if (confirm('¿Crear nueva sesión de entrenamiento? Se perderá la sesión actual no guardada.')) {
     crearNuevaSesion();
@@ -732,11 +898,16 @@ function nuevaSesion(){
 }
 
 /* ============================
-  Temporizador preciso con performance.now()
-============================*/
+   Temporizador preciso
+   - Usa performance.now() y requestAnimationFrame para mayor precisión
+   - Persistencia del estado para mantenerlo entre recargas
+   - vibración y alerta al finalizar
+   ============================ */
+
+/* temporizadorRAF: id de requestAnimationFrame */
 let temporizadorRAF = null;
-let startPerf = null;
-let duracionSeg = temporizadorDefault;
+let temporizadorStartPerf = null;
+let temporizadorDuracionSeg = temporizadorDefault;
 
 function actualizarTemporizadorUI(restante){
   const el = document.getElementById('temporizador');
@@ -753,13 +924,13 @@ function iniciarTemporizador(segundos=null){
   temporizadorDefault = segundos;
   temporizadorState.restante = segundos;
   temporizadorState.running = true;
-  startPerf = performance.now();
+  temporizadorStartPerf = performance.now();
   temporizadorState.lastTick = Date.now();
   saveAll();
 
   if (temporizadorRAF) cancelAnimationFrame(temporizadorRAF);
   function tick(now){
-    const elapsed = (now - startPerf)/1000;
+    const elapsed = (now - temporizadorStartPerf)/1000;
     const restante = Math.max(0, segundos - Math.floor(elapsed));
     actualizarTemporizadorUI(restante);
     temporizadorState.restante = restante;
@@ -785,13 +956,21 @@ function detenerTemporizador(){
   actualizarTemporizadorUI(temporizadorDefault);
 }
 
+/* restoreTemporizadorOnLoad: ajusta el temporizador si estaba en curso */
 function restoreTemporizadorOnLoad(){
   if (temporizadorState.running && temporizadorState.lastTick){
     const now = Date.now();
     const elapsed = Math.round((now - temporizadorState.lastTick)/1000);
     temporizadorState.restante = Math.max(0, (temporizadorState.restante||temporizadorDefault) - elapsed);
-    if (temporizadorState.restante <= 0){ temporizadorState.running = false; temporizadorState.restante = temporizadorDefault; temporizadorState.lastTick = null; saveAll(); actualizarTemporizadorUI(temporizadorDefault); }
-    else iniciarTemporizador(temporizadorState.restante);
+    if (temporizadorState.restante <= 0){
+      temporizadorState.running = false;
+      temporizadorState.restante = temporizadorDefault;
+      temporizadorState.lastTick = null;
+      saveAll();
+      actualizarTemporizadorUI(temporizadorDefault);
+    } else {
+      iniciarTemporizador(temporizadorState.restante);
+    }
   } else {
     temporizadorState.restante = temporizadorState.restante ?? temporizadorDefault;
     actualizarTemporizadorUI(temporizadorState.restante);
@@ -799,25 +978,153 @@ function restoreTemporizadorOnLoad(){
 }
 
 /* ============================
-  Gráficas (Chart.js) y Progreso
-============================*/
+   Graficas: Chart.js
+   - Se implementa robustez: destruir instancia previa antes de crear una nueva
+   - ensureCanvasSize: ajuste para devicePixelRatio para evitar gráficos borrosos o pequeños
+   - aggregateByDay: agrupa series por día (peso máximo y volumen total por día)
+   - IntersectionObserver para dibujar solo cuando la sección está visible
+   - Redibujo en resize con debounce
+   ============================ */
+
 let chartInstance = null;
 
-function renderSelectProgreso(){
-  const sel = document.getElementById('select-progreso');
-  if (!sel) return;
-  const prev = sel.value;
-  sel.innerHTML = '';
-  const set = new Set(ejercicios);
-  rutinas.forEach(r => (r.ejercicios||[]).forEach(e => set.add(e)));
-  Array.from(set).forEach(e => {
-    const opt = document.createElement('option'); opt.value = e; opt.textContent = e; sel.appendChild(opt);
-  });
-  if (prev) sel.value = prev;
-  if (!sel.value && sel.options.length) sel.selectedIndex = 0;
-  sel.onchange = ()=> { drawChart(); renderHistorialByExercise(); };
+/* ensureCanvasSize: ajusta canvas.width/height teniendo en cuenta devicePixelRatio.
+   - Debe ejecutarse antes de crear el Chart.js para evitar que el canvas aparezca pequeño
+   - Utiliza clientWidth/clientHeight para calcular tamaño real
+*/
+function ensureCanvasSize(canvas) {
+  if (!canvas) return;
+  canvas.style.width = '100%';
+  const computed = getComputedStyle(canvas);
+  const cssHeight = parseFloat(computed.height) || canvas.clientHeight || 360;
+  canvas.style.height = cssHeight + 'px';
+  const ratio = window.devicePixelRatio || 1;
+  const w = Math.round(canvas.clientWidth * ratio);
+  const h = Math.round(canvas.clientHeight * ratio);
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  }
 }
 
+/* aggregateByDay: recibe un array de series con {peso,reps,fechaISO}
+   - Retorna labels (dd/mm), pesos (max por día) y volumenes (suma por día)
+*/
+function aggregateByDay(series) {
+  const grouped = {};
+  series.forEach(s => {
+    const d = new Date(s.fechaISO);
+    const key = d.toISOString().split('T')[0]; // YYYY-MM-DD
+    if (!grouped[key]) grouped[key] = { pesoMax: s.peso, volumen: s.peso * s.reps, items: [s] };
+    else {
+      grouped[key].pesoMax = Math.max(grouped[key].pesoMax, s.peso);
+      grouped[key].volumen += s.peso * s.reps;
+      grouped[key].items.push(s);
+    }
+  });
+  const keys = Object.keys(grouped).sort((a,b) => new Date(a) - new Date(b));
+  const labels = keys.map(k => {
+    const d = new Date(k + 'T00:00:00');
+    return `${d.getDate()}/${d.getMonth()+1}`;
+  });
+  const pesos = keys.map(k => grouped[k].pesoMax);
+  const volumenes = keys.map(k => grouped[k].volumen);
+  return { labels, pesos, volumenes, keys, grouped };
+}
+
+/* drawChart: crea o actualiza chartInstance.
+   - Destruye instancia previa (si existe)
+   - Ajusta tamaño del canvas antes de crear la instancia
+   - Usa datasets: barras (volumen) + linea (peso)
+*/
+function drawChart(){
+  const canvas = document.getElementById('graficaProgreso');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  // Obtener ejercicio seleccionado
+  const select = document.getElementById('select-progreso');
+  const ejercicio = select ? select.value : (ejercicios[0] || '');
+
+  // Obtener series para ese ejercicio
+  const todasLasSeries = obtenerTodasLasSeriesDeEjercicio(ejercicio);
+
+  // Si no hay datos, limpiar canvas y mostrar placeholder
+  ensureCanvasSize(canvas); // forzar tamaños independientemente
+  if (!todasLasSeries.length){
+    try {
+      if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+    } catch(e){}
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#f8f8f8';
+    ctx.fillRect(0,0,canvas.clientWidth,canvas.clientHeight);
+    ctx.fillStyle = '#666'; ctx.font = '14px system-ui';
+    ctx.textAlign='center'; ctx.fillText('No hay datos para este ejercicio', canvas.clientWidth/2, canvas.clientHeight/2);
+    return;
+  }
+
+  // Agrupamos por día
+  const { labels, pesos, volumenes } = aggregateByDay(todasLasSeries);
+
+  // Destruimos instancia previa si existe para evitar error "Canvas already in use"
+  if (chartInstance) {
+    try { chartInstance.destroy(); } catch(e) { console.warn('Chart destroy error', e); }
+    chartInstance = null;
+  }
+
+  // Calcular barThickness dinámico (para apariencia razonable)
+  const barThickness = Math.max(10, Math.min(48, Math.floor((canvas.clientWidth / Math.max(1, labels.length)) * 0.6)));
+
+  // Crear chart
+  chartInstance = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Volumen',
+          data: volumenes,
+          backgroundColor: '#d0d0d0',
+          yAxisID: 'y',
+          barThickness
+        },
+        {
+          type: 'line',
+          label: 'Peso (kg)',
+          data: pesos,
+          borderColor: '#111',
+          backgroundColor: '#111',
+          pointRadius: 4,
+          tension: 0.25,
+          yAxisID: 'y2'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { top: 10, bottom: 6, left: 6, right: 6 } },
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 12, color: '#111' } },
+        tooltip: { mode: 'index', intersect: false }
+      },
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { ticks: { color: '#666', maxRotation: 45, minRotation: 0 }, grid: { display: false } },
+        y: { position: 'left', title: { display: true, text: 'Volumen', color: '#666' }, ticks: { color: '#666', beginAtZero: true } },
+        y2: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Peso (kg)', color: '#666' }, ticks: { color: '#666', beginAtZero: true } }
+      },
+      animation: { duration: 200 }
+    }
+  });
+
+  // Forzamos un resize final (ayuda en algunos navegadores)
+  try { chartInstance.resize(); } catch(e){}
+}
+
+/* obtenerTodasLasSeriesDeEjercicio: recorre sesiones y devuelve todas las series de un ejercicio */
 function obtenerTodasLasSeriesDeEjercicio(ejercicio){
   const todasLasSeries = [];
   sesiones.forEach(sesion => {
@@ -831,61 +1138,57 @@ function obtenerTodasLasSeriesDeEjercicio(ejercicio){
       });
     }
   });
+  // ordenar por fecha ascendente
   return todasLasSeries.sort((a,b) => new Date(a.fechaISO) - new Date(b.fechaISO));
 }
 
-function drawChart(){
-  const canvas = document.getElementById('graficaProgreso');
-  const ctx = canvas.getContext('2d');
-  if (chartInstance) {
-    try { chartInstance.destroy(); } catch(e) {}
-    chartInstance = null;
-  }
+/* Debounce de resize para evitar redibujados masivos */
+let chartResizeTimer = null;
+window.addEventListener('resize', ()=> {
+  if (chartResizeTimer) clearTimeout(chartResizeTimer);
+  chartResizeTimer = setTimeout(()=> {
+    // Si la sección "progreso" está activa, redibujamos
+    if (document.getElementById('progreso').classList.contains('active')) drawChart();
+    else if (chartInstance) { try { chartInstance.resize(); } catch(e){} }
+  }, 120);
+});
 
-  const select = document.getElementById('select-progreso');
-  const ejercicio = select ? select.value : (ejercicios[0] || '');
-  const todasLasSeries = obtenerTodasLasSeriesDeEjercicio(ejercicio);
-
-  if (!todasLasSeries.length){
-    // limpiar canvas y poner placeholder
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    ctx.fillStyle = '#f8f8f8';
-    ctx.fillRect(0,0,canvas.clientWidth,canvas.clientHeight);
-    ctx.fillStyle = '#666'; ctx.font = '14px system-ui';
-    ctx.textAlign='center'; ctx.fillText('No hay datos para este ejercicio', canvas.clientWidth/2, canvas.clientHeight/2);
+/* IntersectionObserver: detecta visibilidad de la sección progreso para dibujar solo cuando esté visible.
+   - Mejora rendimiento y evita crear chart cuando canvas está oculto.
+*/
+(function setupProgresoObserver(){
+  const progresoSection = document.getElementById('progreso');
+  if (!('IntersectionObserver' in window) || !progresoSection) {
+    // fallback: redibujar al focus o visibilitychange
+    document.addEventListener('visibilitychange', ()=> {
+      if (!document.hidden && document.getElementById('progreso').classList.contains('active')) drawChart();
+    });
     return;
   }
 
-  const labels = todasLasSeries.map(d => new Date(d.fechaISO).toLocaleDateString());
-  const pesos = todasLasSeries.map(d => d.peso);
-  const volumenes = todasLasSeries.map(d => d.peso * d.reps);
-
-  chartInstance = new Chart(ctx, {
-    data: {
-      labels,
-      datasets: [
-        { type:'bar', label: 'Volumen', data: volumenes, backgroundColor: '#d0d0d0', yAxisID: 'y' },
-        { type:'line', label: 'Peso (kg)', data: pesos, borderColor: '#111', backgroundColor: '#111', tension: 0.2, yAxisID: 'y2' }
-      ]
-    },
-    options: {
-      plugins: { legend: { labels: { color: '#111' } } },
-      scales: {
-        x: { ticks: { color: '#666' } },
-        y: { position: 'left', ticks: { color: '#666' }, title: { display:true, text:'Volumen' } },
-        y2: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color:'#666' }, title: { display:true, text:'Peso (kg)' } }
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        // cuando entra en vista
+        drawChart();
       }
-    }
-  });
-}
+    });
+  }, {root: null, threshold: 0.15});
+
+  observer.observe(progresoSection);
+})();
 
 /* ============================
-  Historial agrupado por ejercicio — acordeón
-============================*/
+   Historial por ejercicio (Acordeón con carga diferida)
+   - renderHistorialByExercise: crea headers y gestiona renderizado del cuerpo al abrir
+   - Carga diferida: el contenido del body se genera solo cuando el usuario abre el acordeón
+   ============================ */
+
 function renderHistorialByExercise(){
   const container = document.getElementById('historial-ejercicios');
   container.innerHTML = '';
 
+  // Generamos conjunto de ejercicios con historial: todos los ejercicios y los encontrados en sesiones
   const set = new Set();
   sesiones.forEach(s => { Object.keys(s.ejercicios||{}).forEach(e => set.add(e)); });
   ejercicios.forEach(e => set.add(e));
@@ -911,82 +1214,117 @@ function renderHistorialByExercise(){
 
     header.appendChild(title); header.appendChild(summary); header.appendChild(chevron);
 
-    const body = document.createElement('div'); body.className = 'accordion-body';
+    // Body vacío por defecto (render diferido)
+    const body = document.createElement('div'); body.className = 'accordion-body'; body.dataset.loaded = 'false';
 
-    if (allSeries.length === 0){
-      body.innerHTML = '<div class="muted">No hay series registradas para este ejercicio</div>';
-    } else {
-      const grouped = {};
-      allSeries.forEach(s => {
-        if (!grouped[s.sesionFecha]) grouped[s.sesionFecha] = [];
-        grouped[s.sesionFecha].push(s);
-      });
-
-      Object.keys(grouped).sort((a,b)=> new Date(b) - new Date(a)).forEach(sessionDate => {
-        const sesDiv = document.createElement('div'); sesDiv.style.marginBottom = '8px';
-        sesDiv.innerHTML = `<div style="font-weight:600;">${new Date(sessionDate).toLocaleDateString()}</div>`;
-        const list = document.createElement('div'); list.style.marginTop='6px';
-        grouped[sessionDate].forEach(s => {
-          const row = document.createElement('div'); row.className = 'series-item';
-          const left = document.createElement('div'); left.innerHTML = `${s.peso}kg × ${s.reps} reps`;
-          const right = document.createElement('div'); right.className='muted'; right.textContent = new Date(s.fechaISO).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-          row.appendChild(left); row.appendChild(right); list.appendChild(row);
-        });
-        sesDiv.appendChild(list); body.appendChild(sesDiv);
-      });
-    }
-
+    // Handler: al hacer click abrimos/cierramos y si no está cargado lo renderizamos
     header.addEventListener('click', ()=>{
       const open = body.classList.contains('open');
       if (open){ body.classList.remove('open'); chevron.innerHTML='▼'; }
-      else { body.classList.add('open'); chevron.innerHTML='▲'; }
+      else {
+        body.classList.add('open'); chevron.innerHTML='▲';
+        if (body.dataset.loaded === 'false') {
+          // Renderizar contenido del body (solo una vez)
+          renderHistoryBodyForExercise(ej, body);
+          body.dataset.loaded = 'true';
+        }
+      }
     });
 
     item.appendChild(header); item.appendChild(body); container.appendChild(item);
   });
 }
 
+/* renderHistoryBodyForExercise: genera el contenido del acordeón para un ejercicio
+   - Agrupa por sesión/fecha
+   - Muestra lista de series con peso/reps/tiempo
+   - Este render se hace solo cuando el acordeón se abre (carga diferida)
+*/
+function renderHistoryBodyForExercise(ej, bodyEl){
+  bodyEl.innerHTML = ''; // limpiar
+  const allSeries = obtenerTodasLasSeriesDeEjercicio(ej);
+  if (allSeries.length === 0){
+    bodyEl.innerHTML = '<div class="muted">No hay series registradas para este ejercicio</div>';
+    return;
+  }
+
+  // Agrupar por sesionFecha
+  const grouped = {};
+  allSeries.forEach(s => {
+    if (!grouped[s.sesionFecha]) grouped[s.sesionFecha] = [];
+    grouped[s.sesionFecha].push(s);
+  });
+
+  // Ordenamos por fecha descendente (últimas primero)
+  Object.keys(grouped).sort((a,b)=> new Date(b) - new Date(a)).forEach(sessionDate => {
+    const sesDiv = document.createElement('div'); sesDiv.style.marginBottom = '8px';
+    const header = document.createElement('div'); header.style.fontWeight = '600'; header.style.marginBottom = '6px';
+    header.textContent = new Date(sessionDate).toLocaleDateString();
+    sesDiv.appendChild(header);
+
+    // Listado de series
+    const list = document.createElement('div'); list.style.marginTop='6px';
+    grouped[sessionDate].forEach(s => {
+      const row = document.createElement('div'); row.className = 'series-item';
+      const left = document.createElement('div'); left.innerHTML = `${s.peso}kg × ${s.reps} reps`;
+      const right = document.createElement('div'); right.className='muted'; right.textContent = new Date(s.fechaISO).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      row.appendChild(left); row.appendChild(right);
+      list.appendChild(row);
+    });
+
+    sesDiv.appendChild(list); bodyEl.appendChild(sesDiv);
+  });
+}
+
 /* ============================
-  Wiring: eventos iniciales
-============================*/
+   Wiring / eventos iniciales (DOMContentLoaded)
+   - Configuración de listeners globales
+   - Restauración de estados: temporizador, selects, chart
+   - Inicio de autosave
+   ============================ */
+
 document.addEventListener('DOMContentLoaded', ()=>{
-  // nav
+
+  // NAV buttons
   document.querySelectorAll('nav button').forEach(b=>{
     b.addEventListener('click', ()=> showSection(b.dataset.section));
   });
 
-  // fab
+  // FABs
   document.getElementById('fab-nuevo-ejercicio').addEventListener('click', ()=> openExerciseModal(null));
   document.getElementById('fab-nueva-rutina').addEventListener('click', ()=> openRutinaModal(null));
 
-  // entrenamiento listeners
+  // Entrenamiento listeners
   document.getElementById('btn-guardar-serie').addEventListener('click', guardarSerie);
   document.getElementById('btn-iniciar-temporizador').addEventListener('click', ()=> iniciarTemporizador());
   document.getElementById('btn-detener-temporizador').addEventListener('click', detenerTemporizador);
   document.getElementById('btn-nueva-sesion').addEventListener('click', nuevaSesion);
 
+  // Input temporizador
   const inputTemp = document.getElementById('input-temporizador-seg');
-  inputTemp.value = temporizadorDefault;
-  inputTemp.addEventListener('change', ()=>{
-    const v = parseInt(inputTemp.value,10);
-    if (isNaN(v) || v < 5) { inputTemp.value = temporizadorDefault; return; }
-    temporizadorDefault = v;
-    temporizadorState.restante = v;
-    temporizadorState.running = false;
-    saveAll();
-    actualizarTemporizadorUI(v);
+  if (inputTemp) {
+    inputTemp.value = temporizadorDefault;
+    inputTemp.addEventListener('change', ()=>{
+      const v = parseInt(inputTemp.value,10);
+      if (isNaN(v) || v < 5) { inputTemp.value = temporizadorDefault; return; }
+      temporizadorDefault = v;
+      temporizadorState.restante = v;
+      temporizadorState.running = false;
+      saveAll();
+      actualizarTemporizadorUI(v);
+    });
+  }
+
+  // Select progreso: onchange redibuja chart y refresca historial
+  const selProg = document.getElementById('select-progreso');
+  if (selProg) selProg.addEventListener('change', ()=> { drawChart(); renderHistorialByExercise(); });
+
+  // Redibujar chart en resize con debounce (ya declarado arriba)
+  window.addEventListener('resize', ()=> {
+    if (document.getElementById('progreso').classList.contains('active')) drawChart();
   });
 
-  // progreso select
-  document.getElementById('select-progreso').addEventListener('change', ()=> {
-    drawChart();
-    renderHistorialByExercise();
-  });
-
-  // window resize -> redraw chart
-  window.addEventListener('resize', ()=> drawChart());
-
-  // inicializar vistas
+  // Init views
   renderEjercicios();
   renderRutinas();
   renderSeriesHoy();
@@ -994,24 +1332,55 @@ document.addEventListener('DOMContentLoaded', ()=>{
   restoreTemporizadorOnLoad();
   renderHistorialByExercise();
 
-  // default section
+  // iniciar autosave
+  startAutoSave();
+
+  // Default section
   showSection('ejercicios');
 });
 
-/* Exponer algunas funciones en window para debugging/uso */
+/* renderSelectProgreso: llena select de progreso con ejercicios y rutinas
+   - Intenta preservar la selección previa
+*/
+function renderSelectProgreso(){
+  const sel = document.getElementById('select-progreso');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '';
+  const set = new Set(ejercicios);
+  rutinas.forEach(r => (r.ejercicios||[]).forEach(e => set.add(e)));
+  Array.from(set).forEach(e => {
+    const opt = document.createElement('option'); opt.value = e; opt.textContent = e; sel.appendChild(opt);
+  });
+  if (prev) sel.value = prev;
+  if (!sel.value && sel.options.length) sel.selectedIndex = 0;
+  sel.onchange = ()=> { drawChart(); renderHistorialByExercise(); };
+}
+
+/* ============================
+   Exponer funciones a window para debugging o uso en consola
+   - Útil para desarrollo: window.drawChart(), window.openRutinaModal(), etc.
+   ============================ */
 window.drawChart = drawChart;
 window.openRutinaModal = openRutinaModal;
 window.openExerciseModal = openExerciseModal;
 
-</script>
+/* ============================
+   Registro del Service Worker (PWA)
+   - Se registra sólo si existe 'serviceWorker' en navigator
+   - Dejarlo tal cual proporciona compatibilidad con tu sw.js ya existente
+   ============================ */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js')
+    .then(reg => console.log('ServiceWorker registrado:', reg.scope))
+    .catch(err => console.error('Error registrando ServiceWorker:', err));
+}
 
-<!-- Registro del Service Worker (PWA) -->
-<script>
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js')
-      .then(reg => console.log('ServiceWorker registrado:', reg.scope))
-      .catch(err => console.error('Error registrando ServiceWorker:', err));
-  }
+/* ============================
+   Fin del script
+   - Archivo index.html listo para reemplazar
+   - Comentarios y estructura preparados para mantenimiento
+   ============================ */
 </script>
 
 </body>
